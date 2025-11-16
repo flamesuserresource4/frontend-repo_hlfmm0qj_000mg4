@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { motion, useScroll, useTransform } from 'framer-motion'
-import Spline from '@splinetool/react-spline'
 import DataTicker from './DataTicker'
+
+const Spline = lazy(() => import('@splinetool/react-spline'))
 
 export default function Hero() {
   const containerRef = useRef(null)
@@ -20,21 +21,55 @@ export default function Hero() {
   )
 
   // Scroll indicator fade out after 3s or on scroll
-  const indicatorOpacity = useTransform(scrollYProgress, [0, 0.2], [1, 0])
+  const [indicatorTimedOut, setIndicatorTimedOut] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setIndicatorTimedOut(true), 3000)
+    return () => clearTimeout(t)
+  }, [])
+  const indicatorOpacityScroll = useTransform(scrollYProgress, [0, 0.2], [1, 0])
+  const [indicatorOpacity, setIndicatorOpacity] = useState(1)
+  useEffect(() => {
+    const unsub = indicatorOpacityScroll.on('change', (v) => {
+      setIndicatorOpacity(Math.min(v, indicatorTimedOut ? 0 : 1))
+    })
+    return () => unsub()
+  }, [indicatorOpacityScroll, indicatorTimedOut])
 
-  // Parallax mouse for Spline wrapper
+  // Parallax mouse for Spline wrapper (rAF-smoothed to reduce work per event)
   const parallaxRef = useRef(null)
   useEffect(() => {
     const el = parallaxRef.current
     if (!el) return
+    let targetX = 0, targetY = 0
+    let currentX = 0, currentY = 0
+    let raf
+
     const onMove = (e) => {
       const { innerWidth: w, innerHeight: h } = window
-      const x = (e.clientX / w - 0.5) * 10 // max 10px
-      const y = (e.clientY / h - 0.5) * 10
-      el.style.transform = `translate3d(${x * 0.3}px, ${y * 0.3}px, 0)`
+      const dx = (e.clientX / w - 0.5) * 10
+      const dy = (e.clientY / h - 0.5) * 10
+      targetX = dx * 0.3
+      targetY = dy * 0.3
+      if (!raf) raf = requestAnimationFrame(tick)
     }
-    window.addEventListener('pointermove', onMove)
-    return () => window.removeEventListener('pointermove', onMove)
+
+    const tick = () => {
+      // ease towards target
+      currentX += (targetX - currentX) * 0.08
+      currentY += (targetY - currentY) * 0.08
+      el.style.transform = `translate3d(${currentX.toFixed(2)}px, ${currentY.toFixed(2)}px, 0)`
+      if (Math.abs(currentX - targetX) > 0.1 || Math.abs(currentY - targetY) > 0.1) {
+        raf = requestAnimationFrame(tick)
+      } else {
+        raf = null
+      }
+    }
+
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      if (raf) cancelAnimationFrame(raf)
+    }
   }, [])
 
   return (
@@ -42,20 +77,13 @@ export default function Hero() {
       ref={containerRef}
       className="relative min-h-screen w-full overflow-hidden bg-[#1A1A1A] text-[#FAFAFA]"
     >
-      {/* Fluid gradient mesh background */}
-      <div className="absolute inset-0">
-        {/* Canvas gradient mesh */}
-        <div className="absolute inset-0">
-          {/* Lazy import via dynamic component boundary can be added later if needed */}
-        </div>
-      </div>
-
-      {/* Left content */}
-      <div className="relative z-10 max-w-7xl mx-auto px-6 sm:px-10 lg:px-16">
-        <div className="min-h-screen grid grid-cols-12 items-center">
+      {/* Left + Right layout with intentional whitespace */}
+      <div className="relative z-10 max-w-[1400px] mx-auto px-6 sm:px-10 lg:px-16">
+        <div className="min-h-screen flex items-center gap-8">
+          {/* Left content 45% */}
           <motion.div
             style={{ scale: headlineScale, opacity: headlineOpacity }}
-            className="col-span-12 md:col-span-6 lg:col-span-5"
+            className="shrink-0 w-full lg:w-[45%]"
           >
             <div className="space-y-6">
               <div className="leading-[1.1] tracking-[-0.02em]">
@@ -104,21 +132,22 @@ export default function Hero() {
             </div>
           </motion.div>
 
-          {/* 3D Spline cover on right */}
+          {/* 3D Spline cover on right 60% */}
           <motion.div
             style={{ scale: networkScale, y: networkY }}
-            className="col-span-12 md:col-span-6 lg:col-span-7 relative"
+            className="relative flex-1 lg:w-[55%]"
           >
             <div
               ref={parallaxRef}
-              className="absolute right-0 top-0 h-[60vh] md:h-[80vh] lg:h-[90vh] w-full md:w-[60vw]"
+              className="absolute right-0 top-0 h-[60vh] md:h-[80vh] lg:h-[90vh] w-full"
             >
-              <Spline
-                scene="https://prod.spline.design/Gt5HUob8aGDxOUep/scene.splinecode"
-                style={{ width: '100%', height: '100%' }}
-              />
-
-              {/* soft gradient overlay for depth - pointer events disabled */}
+              <Suspense fallback={<div className="h-full w-full" />}> 
+                <Spline
+                  scene="https://prod.spline.design/Gt5HUob8aGDxOUep/scene.splinecode"
+                  style={{ width: '100%', height: '100%' }}
+                />
+              </Suspense>
+              {/* Fog/gradient depth overlay */}
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-l from-[#1A1A1A] via-transparent to-transparent" />
             </div>
           </motion.div>
@@ -128,7 +157,7 @@ export default function Hero() {
       {/* Scroll indicator */}
       <motion.div
         style={{ opacity: indicatorOpacity }}
-        className="absolute left-1/2 -translate-x-1/2 bottom-10 flex flex-col items-center gap-3"
+        className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-10 flex flex-col items-center gap-3"
       >
         <div className="text-xs tracking-wide text-[#9AA5A1]" style={{ fontFamily: 'Inter, sans-serif' }}>
           Scroll to see psychology in action

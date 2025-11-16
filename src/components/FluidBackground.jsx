@@ -1,15 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, memo } from 'react'
 
-export default function FluidBackground() {
+function FluidBackgroundImpl() {
   const canvasRef = useRef(null)
   const noiseCanvasRef = useRef(null)
+  const rafRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { alpha: true })
     const noiseCanvas = document.createElement('canvas')
     noiseCanvasRef.current = noiseCanvas
-    const nctx = noiseCanvas.getContext('2d')
+    const nctx = noiseCanvas.getContext('2d', { willReadFrequently: false })
 
     let width = (canvas.width = noiseCanvas.width = window.innerWidth)
     let height = (canvas.height = noiseCanvas.height = window.innerHeight)
@@ -22,21 +23,22 @@ export default function FluidBackground() {
     const points = Array.from({ length: 6 }).map(() => ({
       x: Math.random() * width,
       y: Math.random() * height,
-      vx: (Math.random() - 0.5) * 0.08,
-      vy: (Math.random() - 0.5) * 0.08,
-      r: 200 + Math.random() * 300,
+      vx: (Math.random() - 0.5) * 0.06,
+      vy: (Math.random() - 0.5) * 0.06,
+      r: 240 + Math.random() * 320,
     }))
 
     let startTime = performance.now()
 
     const drawNoise = () => {
       const imgData = nctx.createImageData(noiseCanvas.width, noiseCanvas.height)
+      // sparse noise to keep perf
       for (let i = 0; i < imgData.data.length; i += 4) {
-        const v = (Math.random() * 15) | 0 // subtle grain
-        imgData.data[i] = 0 + v
-        imgData.data[i + 1] = 0 + v
-        imgData.data[i + 2] = 0 + v
-        imgData.data[i + 3] = 13 // ~5% opacity over composite
+        const v = (Math.random() * 12) | 0
+        imgData.data[i] = v
+        imgData.data[i + 1] = v
+        imgData.data[i + 2] = v
+        imgData.data[i + 3] = 13 // ~5% opacity when drawn once per frame
       }
       nctx.putImageData(imgData, 0, 0)
     }
@@ -58,7 +60,8 @@ export default function FluidBackground() {
       })
 
       // radial gradients blending
-      points.forEach((p, i) => {
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i]
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r)
         const colorA = gradientColors[0]
         const colorB = gradientColors[1]
@@ -72,9 +75,9 @@ export default function FluidBackground() {
         ctx.beginPath()
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
         ctx.fill()
-      })
+      }
 
-      // subtle vignette
+      // vignette
       const vignette = ctx.createRadialGradient(
         width * 0.5,
         height * 0.5,
@@ -91,7 +94,7 @@ export default function FluidBackground() {
       // grain overlay
       ctx.drawImage(noiseCanvas, 0, 0)
 
-      requestAnimationFrame(render)
+      rafRef.current = requestAnimationFrame(render)
     }
 
     const onResize = () => {
@@ -101,9 +104,12 @@ export default function FluidBackground() {
     }
 
     drawNoise()
-    requestAnimationFrame(render)
+    rafRef.current = requestAnimationFrame(render)
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      cancelAnimationFrame(rafRef.current)
+    }
   }, [])
 
   return (
@@ -114,3 +120,6 @@ export default function FluidBackground() {
     />
   )
 }
+
+const FluidBackground = memo(FluidBackgroundImpl)
+export default FluidBackground
